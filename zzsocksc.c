@@ -11,6 +11,7 @@
 #include <arpa/inet.h>
 #include <netinet/tcp.h>
 #include <netdb.h>
+#include <sys/select.h>
 
 #define HTTP_HEAD_FILE		"HTTP/1.0 200 OK\r\nConnection: close\r\nContent-Type: application\r\n\r\n"
 #define HTTP_HEAD_404		"HTTP/1.0 404 Not Found\r\nConnection: close\r\n\r\n"
@@ -102,10 +103,11 @@ void * thread_sock_server(void *arg)
 	int sock = (int)(long)arg;
 	unsigned short port = 0;
 	char s[100] = {0}, first[2] = {0x05, 0x00}, *host, buf[4096];
-	int ret = recv(sock, s, 10, 0), temp_sock;
+	int ret = recv(sock, s, 10, 0), temp_sock, max_fd, r;
 	char ok[10] = {0x5, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
 	struct timeval timeout = {5, 0};
 	unsigned int ip;
+	fd_set rset;
 
 	send(sock, first, 2, 0);
 	recv(sock, s, 100, 0);
@@ -126,14 +128,26 @@ void * thread_sock_server(void *arg)
 
 	if (host) printf("%s\n", host);
 
+	max_fd = (temp_sock > sock) ? temp_sock : sock;
 	(void)setsockopt(temp_sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 	(void)setsockopt(temp_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 	if (0 == connect(temp_sock, (void *)&des, sizeof(struct sockaddr))){
 		send(sock, ok, 10, 0);
-		while(ret = recv(sock, buf, 4096, 0)) {
-			send(temp_sock, buf, ret, 0);
-			while(ret = recv(temp_sock, buf, 4096, 0))
-				send(sock, buf, ret, 0);
+		while (1) {
+			FD_ZERO(&rset);
+			FD_SET(temp_sock, &rset);
+			FD_SET(sock, &rset);
+			r = select(max_fd+1, &rset, NULL, NULL, &timeout);
+			if (r < 0) break;
+			if (!r) continue;
+			if (FD_ISSET(sock, &rset)) {
+				ret = recv(sock, buf, 4096, 0);
+				if (send(temp_sock, buf, ret, 0) <= 0) break;
+			}
+			if (FD_ISSET(temp_sock, &rset)) {
+				ret = recv(temp_sock, buf, 4096, 0);
+				if (send(sock, buf, ret, 0) <= 0) break;
+			}
 		}
 	}
 
