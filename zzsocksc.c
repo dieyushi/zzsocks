@@ -127,8 +127,6 @@ void * thread_sock_server(void *arg)
 	des.sin_addr.s_addr = ip;
 	des.sin_port = port;
 
-	/*if (host) printf("%s\n", host);*/
-
 	max_fd = (temp_sock > sock) ? temp_sock : sock;
 	(void)setsockopt(temp_sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 	(void)setsockopt(temp_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
@@ -150,7 +148,7 @@ void * thread_sock_server(void *arg)
 				if (send(sock, buf, ret, 0) <= 0) break;
 			}
 		}
-	}
+	} else syslog(LOG_ERR, "connect %s:%d error", host, ntohs(port));
 
 	close(temp_sock);
 	close(sock);
