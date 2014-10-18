@@ -115,8 +115,8 @@ void * thread_sock_server(void *arg)
 		char len = *(buf+4);
 		host = buf+5;
 		port = *(unsigned short *)(void *)(host+len);
-		DNS(host, &ip);
 		*(host+len) = 0;
+		DNS(host, &ip);
 	}else if(*(int *)(void *)buf == 0x1000105) {
 		ip = *(unsigned int *)(void *)(buf+4);
 		port = *(unsigned short *)(void *)(buf+8);
