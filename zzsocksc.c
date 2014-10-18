@@ -114,7 +114,7 @@ void * thread_sock_server(void *arg)
 	if(*(int *)(void *)buf == 0x3000105) {
 		char len = *(buf+4);
 		host = buf+5;
-		port = *(unsigned short *)(void *)(host+len+1);
+		port = *(unsigned short *)(void *)(host+len);
 		DNS(host, &ip);
 		*(host+len) = 0;
 	}else if(*(int *)(void *)buf == 0x1000105) {
@@ -125,7 +125,7 @@ void * thread_sock_server(void *arg)
 	temp_sock = socket(AF_INET, SOCK_STREAM, 0);
 	struct sockaddr_in des = {.sin_family = AF_INET,};
 	des.sin_addr.s_addr = ip;
-	des.sin_port = htons(port);
+	des.sin_port = port;
 
 	/*if (host) printf("%s\n", host);*/
 
