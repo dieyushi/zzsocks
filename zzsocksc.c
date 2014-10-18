@@ -21,6 +21,37 @@ enum cmd_para{
 	PARA_MAX
 };
 
+static int DNS(char *host, unsigned int *ip) {
+	static int errors = 0;
+	int iRes = 0;
+	struct addrinfo addrHints = {0};
+	struct addrinfo *pAddrResult = NULL, *pAddrRp = NULL;
+	struct sockaddr_in *pSrvAddr = NULL;
+
+	if ((NULL == host) || (NULL == ip)) {
+		return -1;
+	}
+
+	addrHints.ai_family   = AF_INET;        /* do not support IPv6 for performance */
+	addrHints.ai_socktype = 0;
+	addrHints.ai_flags    = 0;
+	addrHints.ai_protocol = 0;
+
+	if (0 == (iRes = getaddrinfo(host, NULL, &addrHints, &pAddrResult))){
+		for (pAddrRp = pAddrResult; pAddrRp != NULL; pAddrRp = pAddrRp->ai_next) {
+			pSrvAddr = (struct sockaddr_in*)(void*)(pAddrRp->ai_addr);
+			*ip = pSrvAddr->sin_addr.s_addr;
+			break;
+		}
+		freeaddrinfo(pAddrResult);
+		return 0;
+	}
+
+	if((++errors)%5 == 0)
+		syslog(LOG_ERR, "getaddrinfo: %s\n", gai_strerror(iRes));
+	return -1;
+}
+
 void url_file(int sock, char *file_name)   /* Maybe binary file */
 {
 	int len;
@@ -68,7 +99,41 @@ void * thread_web_server(void *arg)
 
 void * thread_sock_server(void *arg)
 {
-	(void)arg;
+	int sock = (int)(long)arg;
+	unsigned short port = 0;
+	char s[100] = {0}, first[2] = {0x05, 0x00}, *host, buf[4096];
+	int ret = recv(sock, s, 10, 0), temp_sock;
+	char ok[10] = {0x5, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
+	unsigned int ip;
+
+	send(sock, first, 2, 0);
+	recv(sock, s, 100, 0);
+	if(*(int *)(void *)s == 0x3000105) {
+		char len = *(s+4);
+		host = s+5;
+		port = *(unsigned short *)(void *)(host+len+1);
+		DNS(host, &ip);
+	}else if(*(int *)(void *)s == 0x1000105) {
+		ip = *(unsigned int *)(void *)(s+4);
+		port = *(unsigned short *)(void *)(s+8);
+	}else return (void*)(long) close(sock);
+
+	temp_sock = socket(AF_INET, SOCK_STREAM, 0);
+	struct sockaddr_in des = {.sin_family = AF_INET,};
+	des.sin_addr.s_addr = ip;
+	des.sin_port = htons(port);
+
+	if (0 == connect(temp_sock, (void *)&des, sizeof(struct sockaddr))){
+		send(sock, ok, 10, 0);
+		while(ret = recv(sock, buf, 4096, 0)) {
+			send(temp_sock, buf, ret, 0);
+			while(ret = recv(temp_sock, buf, 4096, 0))
+				send(sock, buf, ret, 0);
+		}
+	}
+
+	close(temp_sock);
+	close(sock);
 	return NULL;
 }
 
@@ -116,7 +181,7 @@ int main(int argc, char *argv[])
 
 	while(sock_port >= 0) {
 		int temp_sock = accept(sock_sock, (void*)&des, (unsigned int *)&size);
-		(void)setsockopt(temp_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+		/*(void)setsockopt(temp_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));*/
 		if(temp_sock >= 0){
 			if(0 == pthread_create(&id, NULL, thread_sock_server, (void *)(long)temp_sock))
 				(void)pthread_detach(id);
