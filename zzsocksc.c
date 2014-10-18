@@ -102,23 +102,24 @@ void * thread_sock_server(void *arg)
 {
 	int sock = (int)(long)arg;
 	unsigned short port = 0;
-	char s[100] = {0}, first[2] = {0x05, 0x00}, *host, buf[4096];
-	int ret = recv(sock, s, 10, 0), temp_sock, max_fd, r;
+	char ver[2] = {0x05, 0x00}, *host, buf[4096] = {0};
+	int ret = recv(sock, buf, 4096, 0), temp_sock, max_fd, r;
 	char ok[10] = {0x5, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
 	struct timeval timeout = {5, 0};
 	unsigned int ip;
 	fd_set rset;
 
-	send(sock, first, 2, 0);
-	recv(sock, s, 100, 0);
-	if(*(int *)(void *)s == 0x3000105) {
-		char len = *(s+4);
-		host = s+5;
+	send(sock, ver, 2, 0);
+	recv(sock, buf, 100, 0);
+	if(*(int *)(void *)buf == 0x3000105) {
+		char len = *(buf+4);
+		host = buf+5;
 		port = *(unsigned short *)(void *)(host+len+1);
 		DNS(host, &ip);
-	}else if(*(int *)(void *)s == 0x1000105) {
-		ip = *(unsigned int *)(void *)(s+4);
-		port = *(unsigned short *)(void *)(s+8);
+		*(host+len) = 0;
+	}else if(*(int *)(void *)buf == 0x1000105) {
+		ip = *(unsigned int *)(void *)(buf+4);
+		port = *(unsigned short *)(void *)(buf+8);
 	}else return (void*)(long) close(sock);
 
 	temp_sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -126,7 +127,7 @@ void * thread_sock_server(void *arg)
 	des.sin_addr.s_addr = ip;
 	des.sin_port = htons(port);
 
-	if (host) printf("%s\n", host);
+	/*if (host) printf("%s\n", host);*/
 
 	max_fd = (temp_sock > sock) ? temp_sock : sock;
 	(void)setsockopt(temp_sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
@@ -192,7 +193,7 @@ int main(int argc, char *argv[])
 	if(listen(sock_sock, 0) != 0)
 		return printf("Error %d to listen the TCP port.\n", errno);
 
-	/*(void)daemon(0, 0);*/
+	(void)daemon(0, 0);
 	strcat(cwd, "/pac");
 	(void)chdir(cwd);
 	if(0 != pthread_create(&id, NULL, thread_web_server, (void*)(long)sock_http))
