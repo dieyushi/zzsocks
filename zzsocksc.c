@@ -104,6 +104,7 @@ void * thread_sock_server(void *arg)
 	char s[100] = {0}, first[2] = {0x05, 0x00}, *host, buf[4096];
 	int ret = recv(sock, s, 10, 0), temp_sock;
 	char ok[10] = {0x5, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
+	struct timeval timeout = {5, 0};
 	unsigned int ip;
 
 	send(sock, first, 2, 0);
@@ -123,6 +124,10 @@ void * thread_sock_server(void *arg)
 	des.sin_addr.s_addr = ip;
 	des.sin_port = htons(port);
 
+	if (host) printf("%s\n", host);
+
+	(void)setsockopt(temp_sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+	(void)setsockopt(temp_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 	if (0 == connect(temp_sock, (void *)&des, sizeof(struct sockaddr))){
 		send(sock, ok, 10, 0);
 		while(ret = recv(sock, buf, 4096, 0)) {
@@ -143,7 +148,7 @@ int main(int argc, char *argv[])
 	struct sockaddr_in addr_http = {.sin_family = AF_INET,}, addr_sock = {.sin_family = AF_INET,}, des = {0,};
 	int size, sock_http, sock_sock, optval = 1;
 	pthread_t id;
-	struct timeval timeout={1, 0};
+	struct timeval timeout={5, 0};
 	short http_port, sock_port;
 	char  cwd[512] = {0,};
 
@@ -181,7 +186,7 @@ int main(int argc, char *argv[])
 
 	while(sock_port >= 0) {
 		int temp_sock = accept(sock_sock, (void*)&des, (unsigned int *)&size);
-		/*(void)setsockopt(temp_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));*/
+		(void)setsockopt(temp_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 		if(temp_sock >= 0){
 			if(0 == pthread_create(&id, NULL, thread_sock_server, (void *)(long)temp_sock))
 				(void)pthread_detach(id);
