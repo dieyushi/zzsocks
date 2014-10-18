@@ -127,6 +127,7 @@ void * thread_sock_server(void *arg)
 	des.sin_addr.s_addr = ip;
 	des.sin_port = port;
 
+	syslog(LOG_ERR, "connect %s:%d", host, ntohs(port));
 	max_fd = (temp_sock > sock) ? temp_sock : sock;
 	(void)setsockopt(temp_sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 	(void)setsockopt(temp_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));

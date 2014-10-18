@@ -1,2 +1,5 @@
-bin/
+bin/zzsocksc
+bin/zzsockss
+core.*
 *.swp
+*.py
