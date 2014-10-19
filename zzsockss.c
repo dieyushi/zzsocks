@@ -57,16 +57,19 @@ static int DNS(char *host, unsigned int *ip) {
 void * thread_sock_server(void *arg)
 {
 	int sock = (int)(long)arg, ret, temp_sock, max_fd, r;
-	struct sockaddr_in des = {.sin_family = AF_INET,};
-	unsigned int ip;
+	struct sockaddr_in des = {.sin_family = AF_INET,}, peer_addr = {.sin_family = AF_INET,};
+	unsigned int ip, addr_len = sizeof(peer_addr);;
 	struct timeval timeout = {5, 0};
-	char buf[CORE_BUF_SIZE] = {0}, *p = NULL;
+	char buf[CORE_BUF_SIZE] = {0};
+	unsigned char *p = NULL, *q = NULL;
 	struct socks_msg msg = {0};
 	fd_set rset;
 
+	(void)getpeername(sock, (void*)&peer_addr, (void *)&addr_len);
 	ret = recv(sock, &msg, sizeof(struct socks_msg), 0);
 	if (msg.magic != MAGIC_NUMBER || msg.hash != g_pw_hash || ret != sizeof(struct socks_msg)) {
-		syslog(LOG_ERR, "connect atempt with wrong magic number or wrong hash\n");
+		q = (void *)&peer_addr.sin_addr.s_addr;
+		syslog(LOG_ERR, "%u.%u.%u.%u with wrong magic number or wrong hash\n", q[0], q[1], q[2], q[3]);
 		close(sock);
 		return NULL;
 	}
@@ -89,7 +92,7 @@ void * thread_sock_server(void *arg)
 	(void)setsockopt(temp_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 	des.sin_addr.s_addr = ip;
 	des.sin_port = msg.port;
-	p = (char *)(void *)&ip;
+	p = (void *)&ip;
 
 	if (0 == connect(temp_sock, (void *)&des, sizeof(struct sockaddr))) {
 		max_fd = (temp_sock > sock) ? temp_sock : sock;
