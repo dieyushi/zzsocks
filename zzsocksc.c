@@ -12,6 +12,7 @@
 #include <netinet/tcp.h>
 #include <netdb.h>
 #include <sys/select.h>
+#include "zzsocks.h"
 
 #define HTTP_HEAD_FILE		"HTTP/1.0 200 OK\r\nConnection: close\r\nContent-Type: application\r\n\r\n"
 #define HTTP_HEAD_404		"HTTP/1.0 404 Not Found\r\nConnection: close\r\n\r\n"
@@ -19,39 +20,15 @@
 enum cmd_para{
 	PARA_HTTP_PORT = 1,
 	PARA_SOCK_PORT,
+	PARA_SERVER_IP,
+	PARA_SERVER_PORT,
+	PARA_SERVER_PW,
 	PARA_MAX
 };
 
-static int DNS(char *host, unsigned int *ip) {
-	static int errors = 0;
-	int iRes = 0;
-	struct addrinfo addrHints = {0};
-	struct addrinfo *pAddrResult = NULL, *pAddrRp = NULL;
-	struct sockaddr_in *pSrvAddr = NULL;
-
-	if ((NULL == host) || (NULL == ip)) {
-		return -1;
-	}
-
-	addrHints.ai_family   = AF_INET;        /* do not support IPv6 for performance */
-	addrHints.ai_socktype = 0;
-	addrHints.ai_flags    = 0;
-	addrHints.ai_protocol = 0;
-
-	if (0 == (iRes = getaddrinfo(host, NULL, &addrHints, &pAddrResult))){
-		for (pAddrRp = pAddrResult; pAddrRp != NULL; pAddrRp = pAddrRp->ai_next) {
-			pSrvAddr = (struct sockaddr_in*)(void*)(pAddrRp->ai_addr);
-			*ip = pSrvAddr->sin_addr.s_addr;
-			break;
-		}
-		freeaddrinfo(pAddrResult);
-		return 0;
-	}
-
-	if((++errors)%5 == 0)
-		syslog(LOG_ERR, "getaddrinfo: %s\n", gai_strerror(iRes));
-	return -1;
-}
+unsigned int g_server_ip = 0;
+unsigned short g_server_port = 0;
+char *g_server_pwd = 0;
 
 void url_file(int sock, char *file_name)   /* Maybe binary file */
 {
@@ -104,35 +81,51 @@ void * thread_sock_server(void *arg)
 	unsigned short port = 0;
 	char ver[2] = {0x05, 0x00}, *host, buf[4096] = {0};
 	int ret = recv(sock, buf, 4096, 0), temp_sock, max_fd, r;
-	char ok[10] = {0x5, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
+	unsigned char ok[10] = {0x5, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0}, *p = 0;
 	struct timeval timeout = {5, 0};
+	struct socks_msg msg = {0};
 	unsigned int ip;
 	fd_set rset;
 
-	send(sock, ver, 2, 0);
-	recv(sock, buf, 100, 0);
-	if(*(int *)(void *)buf == 0x3000105) {
-		char len = *(buf+4);
-		host = buf+5;
-		port = *(unsigned short *)(void *)(host+len);
-		*(host+len) = 0;
-		DNS(host, &ip);
-	}else if(*(int *)(void *)buf == 0x1000105) {
-		ip = *(unsigned int *)(void *)(buf+4);
-		port = *(unsigned short *)(void *)(buf+8);
-	}else return (void*)(long) close(sock);
-
 	temp_sock = socket(AF_INET, SOCK_STREAM, 0);
 	struct sockaddr_in des = {.sin_family = AF_INET,};
-	des.sin_addr.s_addr = ip;
-	des.sin_port = port;
-
-	syslog(LOG_ERR, "connect %s:%d", host, ntohs(port));
-	max_fd = (temp_sock > sock) ? temp_sock : sock;
+	des.sin_addr.s_addr = htonl(g_server_ip);
+	des.sin_port = htons(g_server_port);
+	p = (unsigned char *)(void *)&g_server_ip;
 	(void)setsockopt(temp_sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 	(void)setsockopt(temp_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-	if (0 == connect(temp_sock, (void *)&des, sizeof(struct sockaddr))){
+
+	send(sock, ver, 2, 0);
+	recv(sock, buf, 100, 0);
+	if (0 == connect(temp_sock, (void *)&des, sizeof(struct sockaddr))) {
+		msg.magic = MAGIC_NUMBER;
+		if(*(int *)(void *)buf == 0x3000105) {
+			char len = *(buf+4);
+			host = buf+5;
+			port = *(unsigned short *)(void *)(host+len);
+			*(host+len) = 0;
+
+			msg.port = port;
+			msg.type = TYPE_DNS_RESOVLE;
+			msg.length = len;
+			send(temp_sock, &msg, sizeof(msg), 0);
+			send(temp_sock, host, len, 0);
+		}else if(*(int *)(void *)buf == 0x1000105) {
+			ip = *(unsigned int *)(void *)(buf+4);
+			port = *(unsigned short *)(void *)(buf+8);
+
+			msg.port = port;
+			msg.type = TYPE_DNS_KNOWN;
+			msg.length = ip;
+			send(temp_sock, &msg, sizeof(msg), 0);
+		}else {
+			close(temp_sock);
+			return (void*)(long) close(sock);
+		}
+
 		send(sock, ok, 10, 0);
+		max_fd = (temp_sock > sock) ? temp_sock : sock;
+
 		while (1) {
 			FD_ZERO(&rset);
 			FD_SET(temp_sock, &rset);
@@ -149,7 +142,8 @@ void * thread_sock_server(void *arg)
 				if (send(sock, buf, ret, 0) <= 0) break;
 			}
 		}
-	} else syslog(LOG_ERR, "connect %s:%d error", host, ntohs(port));
+	/*} else syslog(LOG_ERR, "connect server %u:%d error", g_server_ip, g_server_port);*/
+	} else printf("connect server %u.%u.%u.%u:%d error\n", p[3], p[2], p[1], p[0], g_server_port);
 
 	close(temp_sock);
 	close(sock);
@@ -167,11 +161,14 @@ int main(int argc, char *argv[])
 	char  cwd[512] = {0,};
 
 	if(argc != PARA_MAX)
-		return printf("Userage: ./zzsocksc <http port> <sock port> \n");
+		return printf("Userage: ./zzsocksc <http port> <sock port> <server ip> <server port> <password>\n");
 	(void)getcwd(cwd, sizeof(cwd) - 1);
 	(void)sigaction(SIGPIPE, &sa, 0);
 	http_port = (short)atoi(argv[PARA_HTTP_PORT]);
 	sock_port = (short)atoi(argv[PARA_SOCK_PORT]);
+	g_server_ip = (unsigned int)inet_network(argv[PARA_SERVER_IP]);
+	g_server_port = (unsigned short)atoi(argv[PARA_SERVER_PORT]);
+	g_server_pwd = argv[PARA_SERVER_PW];
 
 	addr_http.sin_port = htons(http_port);
 	addr_http.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -192,13 +189,13 @@ int main(int argc, char *argv[])
 	if(listen(sock_sock, 0) != 0)
 		return printf("Error %d to listen the TCP port.\n", errno);
 
-	(void)daemon(0, 0);
+	/*(void)daemon(0, 0);*/
 	strcat(cwd, "/pac");
 	(void)chdir(cwd);
 	if(0 != pthread_create(&id, NULL, thread_web_server, (void*)(long)sock_http))
 		return printf("Error to create thread_web_server.\n");
 
-	while(sock_port >= 0) {
+	while(sock_sock >= 0) {
 		int temp_sock = accept(sock_sock, (void*)&des, (unsigned int *)&size);
 		(void)setsockopt(temp_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 		if(temp_sock >= 0){
@@ -207,4 +204,5 @@ int main(int argc, char *argv[])
 			else close(temp_sock);
 		}
 	}
+	return 0;
 }
