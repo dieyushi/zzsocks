@@ -148,8 +148,7 @@ void * thread_sock_server(void *arg)
 				if (send(sock, buf, ret, 0) <= 0) break;
 			}
 		}
-	/*} else syslog(LOG_ERR, "connect server %u:%d error", g_server_ip, g_server_port);*/
-	} else printf("connect server %u.%u.%u.%u:%d error\n", p[3], p[2], p[1], p[0], g_server_port);
+	} else syslog(LOG_ERR, "connect server %u.%u.%u.%u:%d error\n", p[3], p[2], p[1], p[0], g_server_port);
 
 	close(temp_sock);
 	close(sock);
@@ -195,7 +194,7 @@ int main(int argc, char *argv[])
 	if(listen(sock_sock, 0) != 0)
 		return printf("Error %d to listen the TCP port.\n", errno);
 
-	/*(void)daemon(0, 0);*/
+	(void)daemon(0, 0);
 	strcat(cwd, "/pac");
 	(void)chdir(cwd);
 	if(0 != pthread_create(&id, NULL, thread_web_server, (void*)(long)sock_http))

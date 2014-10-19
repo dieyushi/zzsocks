@@ -65,8 +65,7 @@ void * thread_sock_server(void *arg)
 
 	ret = recv(sock, &msg, sizeof(struct socks_msg), 0);
 	if (msg.magic != MAGIC_NUMBER || ret != sizeof(struct socks_msg)) {
-		/*syslog(LOG_ERR, "connect atempt with wrong magic number\n");*/
-		printf("connect atempt with wrong magic number\n");
+		syslog(LOG_ERR, "connect atempt with wrong magic number\n");
 		close(sock);
 		return NULL;
 	}
@@ -75,13 +74,11 @@ void * thread_sock_server(void *arg)
 		xor_crypt(buf, msg.length, g_server_pwd, msg.num);
 		buf[msg.length] = 0;
 		DNS(buf, &ip);
-		/*syslog(LOG_ERR, "connect %s:%d\n", buf, ntohs(msg.port));*/
-		printf("connect %s:%d\n", buf, ntohs(msg.port));
+		syslog(LOG_ERR, "connect %s:%d\n", buf, ntohs(msg.port));
 	} else if (msg.type == TYPE_DNS_KNOWN) {
 		ip = msg.length;
 	} else {
-		/*syslog(LOG_ERR, "connect atempt with wrong message type\n");*/
-		printf("connect atempt with wrong message type\n");
+		syslog(LOG_ERR, "connect atempt with wrong message type\n");
 		close(sock);
 		return NULL;
 	}
@@ -115,8 +112,7 @@ void * thread_sock_server(void *arg)
 				if (send(sock, buf, ret, 0) <= 0) break;
 			}
 		}
-	/*} else syslog(LOG_ERR, "connect %u.%u.%u.%u:%d error\n", p[0], p[1], p[2], p[3], ntohs(msg.port));*/
-	} else printf("connect %u.%u.%u.%u:%d error\n", p[0], p[1], p[2], p[3], ntohs(msg.port));
+	} else syslog(LOG_ERR, "connect %u.%u.%u.%u:%d error\n", p[0], p[1], p[2], p[3], ntohs(msg.port));
 	close(temp_sock);
 	close(sock);
 	return NULL;
@@ -147,7 +143,7 @@ int main(int argc, char *argv[])
 	if(listen(sock, 0) != 0)
 		return printf("Error %d to listen the TCP port.\n", errno);
 
-	/*(void)daemon(0, 0);*/
+	(void)daemon(0, 0);
 
 	while(sock >= 0) {
 		int temp_sock = accept(sock, (void*)&des, (unsigned int *)&size);
