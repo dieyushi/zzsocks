@@ -20,7 +20,7 @@ enum cmd_para{
 	PARA_MAX
 };
 
-char *g_server_pwd = 0;
+char g_server_pwd[16] = {0};
 
 static int DNS(char *host, unsigned int *ip) {
 	static int errors = 0;
@@ -59,7 +59,7 @@ void * thread_sock_server(void *arg)
 	struct sockaddr_in des = {.sin_family = AF_INET,};
 	unsigned int ip;
 	struct timeval timeout = {5, 0};
-	unsigned char buf[4096] = {0}, *p = NULL;
+	char buf[4096] = {0}, *p = NULL;
 	struct socks_msg msg = {0};
 	fd_set rset;
 
@@ -72,8 +72,9 @@ void * thread_sock_server(void *arg)
 	}
 	if (msg.type == TYPE_DNS_RESOVLE) {
 		recv(sock, buf, msg.length, 0);
+		xor_crypt(buf, msg.length, g_server_pwd);
 		buf[msg.length] = 0;
-		DNS((char *)buf, &ip);
+		DNS(buf, &ip);
 		/*syslog(LOG_ERR, "connect %s:%d\n", buf, ntohs(msg.port));*/
 		printf("connect %s:%d\n", buf, ntohs(msg.port));
 	} else if (msg.type == TYPE_DNS_KNOWN) {
@@ -90,7 +91,7 @@ void * thread_sock_server(void *arg)
 	(void)setsockopt(temp_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 	des.sin_addr.s_addr = ip;
 	des.sin_port = msg.port;
-	p = (unsigned char *)(void *)&ip;
+	p = (char *)(void *)&ip;
 
 	if (0 == connect(temp_sock, (void *)&des, sizeof(struct sockaddr))) {
 		max_fd = (temp_sock > sock) ? temp_sock : sock;
@@ -103,10 +104,12 @@ void * thread_sock_server(void *arg)
 			if (!r) continue;
 			if (FD_ISSET(sock, &rset)) {
 				ret = recv(sock, buf, 4096, 0);
+				xor_crypt(buf, ret, g_server_pwd);
 				if (send(temp_sock, buf, ret, 0) <= 0) break;
 			}
 			if (FD_ISSET(temp_sock, &rset)) {
 				ret = recv(temp_sock, buf, 4096, 0);
+				xor_crypt(buf, ret, g_server_pwd);
 				if (send(sock, buf, ret, 0) <= 0) break;
 			}
 		}
@@ -130,7 +133,7 @@ int main(int argc, char *argv[])
 		return printf("Userage: ./zzsockss <port> <password>\n");
 	(void)sigaction(SIGPIPE, &sa, 0);
 	port = (short)atoi(argv[PARA_LISTEN_PORT]);
-	g_server_pwd = argv[PARA_SERVER_PW];
+	get_key(argv[PARA_SERVER_PW], strlen(argv[PARA_SERVER_PW]), g_server_pwd);
 
 	addr.sin_port = htons(port);
 	addr.sin_addr.s_addr = htonl(INADDR_ANY);

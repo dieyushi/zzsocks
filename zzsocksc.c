@@ -28,7 +28,7 @@ enum cmd_para{
 
 unsigned int g_server_ip = 0;
 unsigned short g_server_port = 0;
-char *g_server_pwd = 0;
+char g_server_pwd[16] = {0};
 
 void url_file(int sock, char *file_name)   /* Maybe binary file */
 {
@@ -109,6 +109,7 @@ void * thread_sock_server(void *arg)
 			msg.type = TYPE_DNS_RESOVLE;
 			msg.length = len;
 			send(temp_sock, &msg, sizeof(msg), 0);
+			xor_crypt(host, len, g_server_pwd);
 			send(temp_sock, host, len, 0);
 		}else if(*(int *)(void *)buf == 0x1000105) {
 			ip = *(unsigned int *)(void *)(buf+4);
@@ -135,10 +136,12 @@ void * thread_sock_server(void *arg)
 			if (!r) continue;
 			if (FD_ISSET(sock, &rset)) {
 				ret = recv(sock, buf, 4096, 0);
+				xor_crypt(buf, ret, g_server_pwd);
 				if (send(temp_sock, buf, ret, 0) <= 0) break;
 			}
 			if (FD_ISSET(temp_sock, &rset)) {
 				ret = recv(temp_sock, buf, 4096, 0);
+				xor_crypt(buf, ret, g_server_pwd);
 				if (send(sock, buf, ret, 0) <= 0) break;
 			}
 		}
@@ -168,7 +171,7 @@ int main(int argc, char *argv[])
 	sock_port = (short)atoi(argv[PARA_SOCK_PORT]);
 	g_server_ip = (unsigned int)inet_network(argv[PARA_SERVER_IP]);
 	g_server_port = (unsigned short)atoi(argv[PARA_SERVER_PORT]);
-	g_server_pwd = argv[PARA_SERVER_PW];
+	get_key(argv[PARA_SERVER_PW], strlen(argv[PARA_SERVER_PW]), g_server_pwd);
 
 	addr_http.sin_port = htons(http_port);
 	addr_http.sin_addr.s_addr = htonl(INADDR_ANY);
