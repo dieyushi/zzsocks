@@ -131,6 +131,8 @@ void * thread_sock_server(void *arg)
 			FD_ZERO(&rset);
 			FD_SET(temp_sock, &rset);
 			FD_SET(sock, &rset);
+			timeout.tv_sec = 5;
+			timeout.tv_usec = 0;
 			r = select(max_fd+1, &rset, NULL, NULL, &timeout);
 			if (r < 0) break;
 			if (!r) continue;
