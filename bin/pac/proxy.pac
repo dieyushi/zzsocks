@@ -2450,7 +2450,7 @@ var domains = {
   "dropboxusercontent.com": 1
 };
 
-var proxy = "SOCKS5 127.0.0.1:8103; SOCKS 127.0.0.1:8103; DIRECT;";
+var proxy = "SOCKS5 127.0.0.1:7001; SOCKS 127.0.0.1:7001; DIRECT;";
 
 var direct = 'DIRECT;';
 
