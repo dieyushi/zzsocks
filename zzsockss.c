@@ -20,7 +20,7 @@ enum cmd_para{
 	PARA_MAX
 };
 
-char g_server_pwd[16] = {0};
+char g_server_pwd[MAX_VALID_PW] = {0};
 
 static int DNS(char *host, unsigned int *ip) {
 	static int errors = 0;
@@ -59,7 +59,7 @@ void * thread_sock_server(void *arg)
 	struct sockaddr_in des = {.sin_family = AF_INET,};
 	unsigned int ip;
 	struct timeval timeout = {5, 0};
-	char buf[4096] = {0}, *p = NULL;
+	char buf[CORE_BUF_SIZE] = {0}, *p = NULL;
 	struct socks_msg msg = {0};
 	fd_set rset;
 
@@ -72,7 +72,7 @@ void * thread_sock_server(void *arg)
 	}
 	if (msg.type == TYPE_DNS_RESOVLE) {
 		recv(sock, buf, msg.length, 0);
-		xor_crypt(buf, msg.length, g_server_pwd);
+		xor_crypt(buf, msg.length, g_server_pwd, msg.num);
 		buf[msg.length] = 0;
 		DNS(buf, &ip);
 		/*syslog(LOG_ERR, "connect %s:%d\n", buf, ntohs(msg.port));*/
@@ -105,13 +105,13 @@ void * thread_sock_server(void *arg)
 			if (r < 0) break;
 			if (!r) continue;
 			if (FD_ISSET(sock, &rset)) {
-				ret = recv(sock, buf, 4096, 0);
-				xor_crypt(buf, ret, g_server_pwd);
+				ret = recv(sock, buf, CORE_BUF_SIZE, 0);
+				xor_crypt(buf, ret, g_server_pwd, msg.num);
 				if (send(temp_sock, buf, ret, 0) <= 0) break;
 			}
 			if (FD_ISSET(temp_sock, &rset)) {
-				ret = recv(temp_sock, buf, 4096, 0);
-				xor_crypt(buf, ret, g_server_pwd);
+				ret = recv(temp_sock, buf, CORE_BUF_SIZE, 0);
+				xor_crypt(buf, ret, g_server_pwd, msg.num);
 				if (send(sock, buf, ret, 0) <= 0) break;
 			}
 		}

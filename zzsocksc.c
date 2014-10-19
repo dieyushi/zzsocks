@@ -28,7 +28,7 @@ enum cmd_para{
 
 unsigned int g_server_ip = 0;
 unsigned short g_server_port = 0;
-char g_server_pwd[16] = {0};
+char g_server_pwd[MAX_VALID_PW] = {0};
 
 void url_file(int sock, char *file_name)   /* Maybe binary file */
 {
@@ -77,10 +77,10 @@ void * thread_web_server(void *arg)
 
 void * thread_sock_server(void *arg)
 {
-	int sock = (int)(long)arg;
+	int sock = (int)(long)arg, num = time(NULL) % MAX_VALID_PW;
 	unsigned short port = 0;
-	char ver[2] = {0x05, 0x00}, *host, buf[4096] = {0};
-	int ret = recv(sock, buf, 4096, 0), temp_sock, max_fd, r;
+	char ver[2] = {0x05, 0x00}, *host, buf[CORE_BUF_SIZE] = {0};
+	int ret = recv(sock, buf, CORE_BUF_SIZE, 0), temp_sock, max_fd, r;
 	unsigned char ok[10] = {0x5, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0}, *p = 0;
 	struct timeval timeout = {5, 0};
 	struct socks_msg msg = {0};
@@ -99,6 +99,7 @@ void * thread_sock_server(void *arg)
 	recv(sock, buf, 100, 0);
 	if (0 == connect(temp_sock, (void *)&des, sizeof(struct sockaddr))) {
 		msg.magic = MAGIC_NUMBER;
+		msg.num = num;
 		if(*(int *)(void *)buf == 0x3000105) {
 			char len = *(buf+4);
 			host = buf+5;
@@ -109,7 +110,7 @@ void * thread_sock_server(void *arg)
 			msg.type = TYPE_DNS_RESOVLE;
 			msg.length = len;
 			send(temp_sock, &msg, sizeof(msg), 0);
-			xor_crypt(host, len, g_server_pwd);
+			xor_crypt(host, len, g_server_pwd, num);
 			send(temp_sock, host, len, 0);
 		}else if(*(int *)(void *)buf == 0x1000105) {
 			ip = *(unsigned int *)(void *)(buf+4);
@@ -137,13 +138,13 @@ void * thread_sock_server(void *arg)
 			if (r < 0) break;
 			if (!r) continue;
 			if (FD_ISSET(sock, &rset)) {
-				ret = recv(sock, buf, 4096, 0);
-				xor_crypt(buf, ret, g_server_pwd);
+				ret = recv(sock, buf, CORE_BUF_SIZE, 0);
+				xor_crypt(buf, ret, g_server_pwd, num);
 				if (send(temp_sock, buf, ret, 0) <= 0) break;
 			}
 			if (FD_ISSET(temp_sock, &rset)) {
-				ret = recv(temp_sock, buf, 4096, 0);
-				xor_crypt(buf, ret, g_server_pwd);
+				ret = recv(temp_sock, buf, CORE_BUF_SIZE, 0);
+				xor_crypt(buf, ret, g_server_pwd, num);
 				if (send(sock, buf, ret, 0) <= 0) break;
 			}
 		}
