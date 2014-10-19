@@ -28,6 +28,7 @@ enum cmd_para{
 
 unsigned int g_server_ip = 0;
 unsigned short g_server_port = 0;
+unsigned int g_pw_hash = 0;
 char g_server_pwd[MAX_VALID_PW] = {0};
 
 void url_file(int sock, char *file_name)   /* Maybe binary file */
@@ -100,6 +101,7 @@ void * thread_sock_server(void *arg)
 	if (0 == connect(temp_sock, (void *)&des, sizeof(struct sockaddr))) {
 		msg.magic = MAGIC_NUMBER;
 		msg.num = num;
+		msg.hash = g_pw_hash;
 		if(*(int *)(void *)buf == 0x3000105) {
 			char len = *(buf+4);
 			host = buf+5;
@@ -173,7 +175,7 @@ int main(int argc, char *argv[])
 	sock_port = (short)atoi(argv[PARA_SOCK_PORT]);
 	g_server_ip = (unsigned int)inet_network(argv[PARA_SERVER_IP]);
 	g_server_port = (unsigned short)atoi(argv[PARA_SERVER_PORT]);
-	get_key(argv[PARA_SERVER_PW], strlen(argv[PARA_SERVER_PW]), g_server_pwd);
+	g_pw_hash = get_key(argv[PARA_SERVER_PW], strlen(argv[PARA_SERVER_PW]), g_server_pwd);
 
 	addr_http.sin_port = htons(http_port);
 	addr_http.sin_addr.s_addr = htonl(INADDR_ANY);

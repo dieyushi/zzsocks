@@ -21,6 +21,7 @@ enum cmd_para{
 };
 
 char g_server_pwd[MAX_VALID_PW] = {0};
+unsigned int g_pw_hash = 0;
 
 static int DNS(char *host, unsigned int *ip) {
 	static int errors = 0;
@@ -64,8 +65,8 @@ void * thread_sock_server(void *arg)
 	fd_set rset;
 
 	ret = recv(sock, &msg, sizeof(struct socks_msg), 0);
-	if (msg.magic != MAGIC_NUMBER || ret != sizeof(struct socks_msg)) {
-		syslog(LOG_ERR, "connect atempt with wrong magic number\n");
+	if (msg.magic != MAGIC_NUMBER || msg.hash != g_pw_hash || ret != sizeof(struct socks_msg)) {
+		syslog(LOG_ERR, "connect atempt with wrong magic number or wrong hash\n");
 		close(sock);
 		return NULL;
 	}
@@ -131,7 +132,7 @@ int main(int argc, char *argv[])
 		return printf("Userage: ./zzsockss <port> <password>\n");
 	(void)sigaction(SIGPIPE, &sa, 0);
 	port = (short)atoi(argv[PARA_LISTEN_PORT]);
-	get_key(argv[PARA_SERVER_PW], strlen(argv[PARA_SERVER_PW]), g_server_pwd);
+	g_pw_hash = get_key(argv[PARA_SERVER_PW], strlen(argv[PARA_SERVER_PW]), g_server_pwd);
 
 	addr.sin_port = htons(port);
 	addr.sin_addr.s_addr = htonl(INADDR_ANY);
