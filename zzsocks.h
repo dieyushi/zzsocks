@@ -1,6 +1,6 @@
 struct socks_msg {
 	unsigned int magic;
-	unsigned int key;
+	unsigned int num;
 	unsigned short type;
 	unsigned short port;
 	unsigned int length;
@@ -8,7 +8,6 @@ struct socks_msg {
 
 #define TYPE_DNS_RESOVLE	0
 #define TYPE_DNS_KNOWN		1
-#define TYPE_DATA_TRANSE	2
 
 #define MAGIC_NUMBER		0x1a2b3c4d
 
@@ -23,10 +22,10 @@ static inline void get_key(char *pw, int pw_len, char *key)
 	}
 }
 
-static inline void xor_crypt(char *data, int length, char *key)
+static inline void xor_crypt(char *data, int length, char *key, int num)
 {
-	int i, j;
+	int i;
 	for (i = 0; i < length; ++i)
-		data[i] ^= key[0];
+		data[i] ^= key[num];
 }
 
