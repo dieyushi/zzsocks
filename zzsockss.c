@@ -242,7 +242,7 @@ int main(int argc, char *argv[])
 	if(listen(sock, 0) != 0)
 		return printf("Error %d to listen the TCP port.\n", errno);
 
-	/*(void)daemon(0, 0);*/
+	(void)daemon(0, 0);
 
 	g_epoll_fd = epoll_create1(0);
 	if (g_epoll_fd == -1) return printf("Error %d to create epoll fd.\n", errno);
