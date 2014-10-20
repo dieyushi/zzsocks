@@ -194,7 +194,7 @@ void epoll_worker(int temp_sock, int sock)
 		if (!c->status) {
 			c->status = 1;
 			ret = make_connection(c, buf);
-			if (!ret) clean_client(c);
+			if (ret) clean_client(c);
 		} else if (temp_sock == c->sock) {
 			ret = recv(temp_sock, buf, CORE_BUF_SIZE, 0);
 			xor_crypt(buf, ret, g_server_pwd, c->msg_num);
