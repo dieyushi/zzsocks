@@ -15,6 +15,7 @@
 #include <netdb.h>
 #include <sys/select.h>
 #include "zzsocks.h"
+#include "list.h"
 
 enum cmd_para{
 	PARA_LISTEN_PORT = 1,
@@ -23,9 +24,10 @@ enum cmd_para{
 };
 
 #define MAX_EVENTS 10240
-#define MAX_CLIENTS 10240
+#define CLIENT_HASH_MAX 1024
 
 struct client {
+	struct list_head item;
 	int sock;
 	int temp_sock;
 	int status;
@@ -36,8 +38,8 @@ static char g_server_pwd[MAX_VALID_PW] = {0};
 static unsigned int g_pw_hash = 0;
 static int g_epoll_fd = 0;
 static struct epoll_event g_ev = {0};
-static int g_client_num = 0;
-static struct client g_clients[MAX_CLIENTS] = {0};
+static struct list_head g_clients_array[CLIENT_HASH_MAX];
+static struct list_head g_temp_array[CLIENT_HASH_MAX];
 
 int set_non_blocking(int fd)
 {
@@ -77,30 +79,16 @@ static int DNS(char *host, unsigned int *ip) {
 	return -1;
 }
 
-struct client *find_client_slow(int sock)
-{
-	int i = 0;
-	for (i = 0; i < MAX_CLIENTS; i++) {
-		if (g_clients[i].sock == sock || g_clients[i].temp_sock == sock)
-			return &g_clients[i];
-	}
-	return 0;
-}
-
-struct client *find_empty_client(int sock)
-{
-	if (sock < MAX_CLIENTS && sock >= 0 && g_clients[sock].sock == -1)
-		return &g_clients[sock];
-	else
-		return find_client_slow(-1);
-}
-
 struct client *find_client(int sock)
 {
-	if (sock < MAX_CLIENTS && sock >= 0 && g_clients[sock].sock == sock)
-		return &g_clients[sock];
-	else
-		return find_client_slow(sock);
+	int hash = sock & (CLIENT_HASH_MAX - 1);
+	struct client *obj = NULL;
+	list_for_each_entry(obj, &g_clients_array[hash], item){
+		if (obj->sock == sock) return obj;
+	}
+	list_for_each_entry(obj, &g_temp_array[hash], item){
+		if (obj->temp_sock == sock) return obj;
+	}
 }
 
 int make_connection(struct client *c, char *buf)
@@ -140,11 +128,16 @@ int make_connection(struct client *c, char *buf)
 	p = (void *)&ip;
 
 	if (0 == connect(temp_sock, (void *)&des, sizeof(struct sockaddr))) {
+		int hash = temp_sock & (CLIENT_HASH_MAX - 1);
 		c->temp_sock = temp_sock;
 		c->msg_num = msg.num;
 		g_ev.data.fd = temp_sock;
 		g_ev.events = EPOLLIN;
 		epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, temp_sock, &g_ev);
+		struct client *new = calloc(1, sizeof(struct client));
+		memcpy(new, c, sizeof(struct client));
+		INIT_LIST_HEAD(&new->item);
+		list_add_tail(&new->item, &g_temp_array[hash]);
 	} else {
 		syslog(LOG_ERR, "connect %u.%u.%u.%u:%d error\n", p[0], p[1], p[2], p[3], ntohs(msg.port));
 		return -1;
@@ -160,28 +153,39 @@ void accept_sock(int sock)
 
 	while((client_sock = accept(sock, (void *)&addr, &addr_len)) >= 0) {
 		/*if (g_client_num >= MAX_CLIENTS || -1 == set_non_blocking(client_sock)){*/
-		if (g_client_num >= MAX_CLIENTS){
-			close(client_sock);
-			return;
-		}
-
 		g_ev.data.fd = client_sock;
 		g_ev.events = EPOLLIN;
 		epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, client_sock, &g_ev);
 
-		struct client *c = find_empty_client(client_sock);
+		struct client *c = calloc(1, sizeof(struct client));
 		c->sock = client_sock;
 		c->status = 0;
-		g_client_num++;
+		int hash = client_sock & (CLIENT_HASH_MAX - 1);
+		INIT_LIST_HEAD(&c->item);
+		list_add_tail(&c->item, &g_clients_array[hash]);
 	}
 }
 
 void clean_client(struct client *c)
 {
+	int hash1 = c->sock & (CLIENT_HASH_MAX - 1), hash2 = c->temp_sock & (CLIENT_HASH_MAX - 1);
+	struct list_head *head = &g_clients_array[hash1];
+	struct client *obj = NULL, *next = NULL;
 	if (c->sock >= 0) close(c->sock);
 	if (c->temp_sock >= 0) close(c->temp_sock);
-	c->sock = -1;
-	g_client_num--;
+	list_for_each_entry_safe(obj, next, head, item) {
+		if (obj->sock == c->sock) {
+			list_del(&obj->item);
+			free(obj);
+		}
+	}
+	head = &g_temp_array[hash2];
+	list_for_each_entry_safe(obj, next, head, item) {
+		if (obj->temp_sock == c->temp_sock) {
+			list_del(&obj->item);
+			free(obj);
+		}
+	}
 }
 
 void epoll_worker(int temp_sock, int sock)
@@ -218,8 +222,10 @@ int main(int argc, char *argv[])
 
 	struct epoll_event *events = (struct epoll_event *)malloc(sizeof(struct epoll_event) * MAX_EVENTS);
 
-	for (i = 0; i< MAX_EVENTS; ++i)
-		g_clients[i].sock = -1;
+	for (i = 0; i < CLIENT_HASH_MAX; ++i) {
+		INIT_LIST_HEAD(&g_clients_array[i]);
+		INIT_LIST_HEAD(&g_temp_array[i]);
+	}
 
 	my_params.sched_priority = sched_get_priority_max(SCHED_RR);
 	(void)sched_setscheduler(0, SCHED_RR, &my_params);
