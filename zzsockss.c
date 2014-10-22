@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -25,13 +26,26 @@ enum cmd_para{
 
 #define MAX_EVENTS 10240
 #define CLIENT_HASH_MAX 1024
+#define STATUS_ACCEPT	0
+#define STATUS_DNS_SEND	1
+#define STATUS_DNS_DONE	2
+#define STATUS_CONNECTED 3
 
 struct client {
 	struct list_head item;
 	int sock;
 	int temp_sock;
-	int status;
-	int msg_num;
+	short status;
+	short msg_num;
+	short port;
+	short reserved;
+};
+
+struct dns {
+	struct client *c;
+	char *domain;
+	struct gaicb reqs[1];
+	struct list_head item;
 };
 
 static char g_server_pwd[MAX_VALID_PW] = {0};
@@ -40,43 +54,13 @@ static int g_epoll_fd = 0;
 static struct epoll_event g_ev = {0};
 static struct list_head g_clients_array[CLIENT_HASH_MAX];
 static struct list_head g_temp_array[CLIENT_HASH_MAX];
+static struct list_head g_dns_array = LIST_HEAD_INIT(g_dns_array);
 
 int set_non_blocking(int fd)
 {
 	int flags = fcntl(fd, F_GETFL, 0);
 	if (flags == -1) flags = 0;
 	return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-}
-
-static int DNS(char *host, unsigned int *ip) {
-	static int errors = 0;
-	int iRes = 0;
-	struct addrinfo addrHints = {0};
-	struct addrinfo *pAddrResult = NULL, *pAddrRp = NULL;
-	struct sockaddr_in *pSrvAddr = NULL;
-
-	if ((NULL == host) || (NULL == ip)) {
-		return -1;
-	}
-
-	addrHints.ai_family   = AF_INET;        /* do not support IPv6 for performance */
-	addrHints.ai_socktype = 0;
-	addrHints.ai_flags    = 0;
-	addrHints.ai_protocol = 0;
-
-	if (0 == (iRes = getaddrinfo(host, NULL, &addrHints, &pAddrResult))){
-		for (pAddrRp = pAddrResult; pAddrRp != NULL; pAddrRp = pAddrRp->ai_next) {
-			pSrvAddr = (struct sockaddr_in*)(void*)(pAddrRp->ai_addr);
-			*ip = pSrvAddr->sin_addr.s_addr;
-			break;
-		}
-		freeaddrinfo(pAddrResult);
-		return 0;
-	}
-
-	if((++errors)%5 == 0)
-		syslog(LOG_ERR, "getaddrinfo: %s\n", gai_strerror(iRes));
-	return -1;
 }
 
 struct client *find_client(int sock)
@@ -88,81 +72,6 @@ struct client *find_client(int sock)
 	}
 	list_for_each_entry(obj, &g_temp_array[hash], item){
 		if (obj->temp_sock == sock) return obj;
-	}
-}
-
-int make_connection(struct client *c, char *buf)
-{
-	int sock = c->sock, ret, temp_sock;
-	struct sockaddr_in des = {.sin_family = AF_INET,}, peer_addr = {.sin_family = AF_INET,};
-	unsigned int ip, addr_len = sizeof(peer_addr);
-	struct timeval timeout = {5, 0};
-	unsigned char *p = NULL, *q = NULL;
-	struct socks_msg msg = {0};
-
-	(void)getpeername(sock, (void*)&peer_addr, (void *)&addr_len);
-	ret = recv(sock, &msg, sizeof(struct socks_msg), 0);
-	if (msg.magic != MAGIC_NUMBER || msg.hash != g_pw_hash || ret != sizeof(struct socks_msg)) {
-		q = (void *)&peer_addr.sin_addr.s_addr;
-		syslog(LOG_ERR, "%u.%u.%u.%u with wrong magic number or wrong hash\n", q[0], q[1], q[2], q[3]);
-		return -1;
-	}
-	if (msg.type == TYPE_DNS_RESOVLE) {
-		recv(sock, buf, msg.length, 0);
-		xor_crypt(buf, msg.length, g_server_pwd, msg.num);
-		buf[msg.length] = 0;
-		DNS(buf, &ip);
-		syslog(LOG_ERR, "connect %s:%d\n", buf, ntohs(msg.port));
-	} else if (msg.type == TYPE_DNS_KNOWN) {
-		ip = msg.length;
-	} else {
-		syslog(LOG_ERR, "connect atempt with wrong message type\n");
-		return -1;
-	}
-
-	temp_sock = socket(AF_INET, SOCK_STREAM, 0);
-	(void)setsockopt(temp_sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-	(void)setsockopt(temp_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-	des.sin_addr.s_addr = ip;
-	des.sin_port = msg.port;
-	p = (void *)&ip;
-
-	if (0 == connect(temp_sock, (void *)&des, sizeof(struct sockaddr))) {
-		int hash = temp_sock & (CLIENT_HASH_MAX - 1);
-		c->temp_sock = temp_sock;
-		c->msg_num = msg.num;
-		g_ev.data.fd = temp_sock;
-		g_ev.events = EPOLLIN;
-		epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, temp_sock, &g_ev);
-		struct client *new = calloc(1, sizeof(struct client));
-		memcpy(new, c, sizeof(struct client));
-		INIT_LIST_HEAD(&new->item);
-		list_add_tail(&new->item, &g_temp_array[hash]);
-	} else {
-		syslog(LOG_ERR, "connect %u.%u.%u.%u:%d error\n", p[0], p[1], p[2], p[3], ntohs(msg.port));
-		return -1;
-	}
-	return 0;
-}
-
-void accept_sock(int sock)
-{
-	int client_sock = 0, optval;
-	struct sockaddr_in addr = {0};
-	socklen_t addr_len = sizeof(addr);
-
-	while((client_sock = accept(sock, (void *)&addr, &addr_len)) >= 0) {
-		/*if (g_client_num >= MAX_CLIENTS || -1 == set_non_blocking(client_sock)){*/
-		g_ev.data.fd = client_sock;
-		g_ev.events = EPOLLIN;
-		epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, client_sock, &g_ev);
-
-		struct client *c = calloc(1, sizeof(struct client));
-		c->sock = client_sock;
-		c->status = 0;
-		int hash = client_sock & (CLIENT_HASH_MAX - 1);
-		INIT_LIST_HEAD(&c->item);
-		list_add_tail(&c->item, &g_clients_array[hash]);
 	}
 }
 
@@ -188,6 +97,135 @@ void clean_client(struct client *c)
 	}
 }
 
+static int dns_query(char *domain, struct client *c)
+{
+	struct sigevent sevp = {0};
+	struct dns *dns_item = (void *)calloc(1, sizeof(struct dns));
+	INIT_LIST_HEAD(&dns_item->item);
+	dns_item->reqs[0].ar_name = domain;
+	dns_item->domain = domain;
+	dns_item->c = c;
+	list_add_tail(&dns_item->item, &g_dns_array);
+
+	struct gaicb *obj = &(dns_item->reqs[0]);
+	sevp.sigev_value.sival_ptr = (void *)dns_item;
+	sevp.sigev_notify = SIGEV_SIGNAL;
+	sevp.sigev_signo = SIGUSR1;
+
+	return getaddrinfo_a(GAI_NOWAIT, &obj, 1, &sevp);
+}
+
+static void dns_query_done(int signo, siginfo_t *info, void *secret)
+{
+	struct addrinfo *res;
+	struct dns *dns_item = info->si_value.sival_ptr;
+	struct gaicb *reqs = &(dns_item->reqs[0]);
+	struct client *c = dns_item->c;
+
+	if (gai_error(reqs)) {
+		clean_client(c);
+		return;
+	}
+	res = reqs->ar_result;
+	struct sockaddr_in *addr = (struct sockaddr_in *)(void *)res->ai_addr;
+	c->temp_sock = addr->sin_addr.s_addr;
+	c->status = STATUS_DNS_DONE;
+	list_del(&dns_item->item);
+	unsigned char *p =(void *)&c->temp_sock;
+	syslog(LOG_ERR, "query dns done: %s -> %u.%u.%u.%u", dns_item->domain, p[0], p[1], p[2], p[3]);
+	free(dns_item->domain);
+}
+
+int make_connection(struct client *c, char *buf)
+{
+	int sock = c->sock, ret;
+	struct sockaddr_in peer_addr = {.sin_family = AF_INET,};
+	unsigned int addr_len = sizeof(peer_addr);
+	unsigned char *q = NULL;
+	struct socks_msg msg = {0};
+
+	(void)getpeername(sock, (void*)&peer_addr, (void *)&addr_len);
+	ret = recv(sock, &msg, sizeof(struct socks_msg), 0);
+	if (msg.magic != MAGIC_NUMBER || msg.hash != g_pw_hash || ret != sizeof(struct socks_msg)) {
+		q = (void *)&peer_addr.sin_addr.s_addr;
+		syslog(LOG_ERR, "%u.%u.%u.%u with wrong magic number or wrong hash\n", q[0], q[1], q[2], q[3]);
+		return -1;
+	}
+	c->port = msg.port;
+	c->msg_num = msg.num;
+	if (msg.type == TYPE_DNS_RESOVLE) {
+		recv(sock, buf, msg.length, 0);
+		xor_crypt(buf, msg.length, g_server_pwd, msg.num);
+		buf[msg.length] = 0;
+		char *domain = (char *)calloc(1, msg.length + 1);
+		memcpy(domain, buf, msg.length);
+		dns_query(domain, c);
+		c->status = STATUS_DNS_SEND;
+		syslog(LOG_ERR, "connect %s:%d\n", buf, ntohs(msg.port));
+	} else if (msg.type == TYPE_DNS_KNOWN) {
+		c->temp_sock = msg.length;
+		c->status = STATUS_DNS_DONE;
+	} else {
+		syslog(LOG_ERR, "connect atempt with wrong message type\n");
+		return -1;
+	}
+
+	return 0;
+}
+
+int connect_to_remote(struct client *c)
+{
+	struct sockaddr_in des = {.sin_family = AF_INET,};
+	struct timeval timeout = {5, 0};
+	unsigned char *p = NULL;
+	unsigned int ip = c->temp_sock;
+
+	p = (void *)&ip;
+	syslog(LOG_ERR, "connecting %u.%u.%u.%u:%d\n", p[0], p[1], p[2], p[3], ntohs(c->port));
+	int temp_sock = socket(AF_INET, SOCK_STREAM, 0);
+	(void)setsockopt(temp_sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+	(void)setsockopt(temp_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+	des.sin_addr.s_addr = ip;
+	des.sin_port = (unsigned short)c->port;
+
+	if (0 == connect(temp_sock, (void *)&des, sizeof(struct sockaddr))) {
+		int hash = temp_sock & (CLIENT_HASH_MAX - 1);
+		c->temp_sock = temp_sock;
+		g_ev.data.fd = temp_sock;
+		g_ev.events = EPOLLIN;
+		epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, temp_sock, &g_ev);
+		struct client *new = calloc(1, sizeof(struct client));
+		memcpy(new, c, sizeof(struct client));
+		INIT_LIST_HEAD(&new->item);
+		list_add_tail(&new->item, &g_temp_array[hash]);
+		c->status = STATUS_CONNECTED;
+	} else {
+		syslog(LOG_ERR, "connect %u.%u.%u.%u:%d error\n", p[0], p[1], p[2], p[3], ntohs(c->port));
+		return -1;
+	}
+	return 0;
+}
+
+void accept_sock(int sock)
+{
+	int client_sock = 0, optval;
+	struct sockaddr_in addr = {0};
+	socklen_t addr_len = sizeof(addr);
+
+	while((client_sock = accept(sock, (void *)&addr, &addr_len)) >= 0) {
+		g_ev.data.fd = client_sock;
+		g_ev.events = EPOLLIN;
+		epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, client_sock, &g_ev);
+
+		struct client *c = calloc(1, sizeof(struct client));
+		c->sock = client_sock;
+		c->status = STATUS_ACCEPT;
+		int hash = client_sock & (CLIENT_HASH_MAX - 1);
+		INIT_LIST_HEAD(&c->item);
+		list_add_tail(&c->item, &g_clients_array[hash]);
+	}
+}
+
 void epoll_worker(int temp_sock, int sock)
 {
 	int ret = 0, sock2;
@@ -195,9 +233,13 @@ void epoll_worker(int temp_sock, int sock)
 	if (temp_sock == sock) accept_sock(sock);
 	else {
 		struct client *c = find_client(temp_sock);
-		if (!c->status) {
-			c->status = 1;
+		if (c->status == STATUS_ACCEPT) {
 			ret = make_connection(c, buf);
+			if (ret) clean_client(c);
+		} else if (c->status == STATUS_DNS_SEND) {
+			return;
+		} else if (c->status == STATUS_DNS_DONE) {
+			ret = connect_to_remote(c);
 			if (ret) clean_client(c);
 		} else if (temp_sock == c->sock) {
 			ret = recv(temp_sock, buf, CORE_BUF_SIZE, 0);
@@ -233,6 +275,10 @@ int main(int argc, char *argv[])
 	if(argc != PARA_MAX)
 		return printf("Userage: ./zzsockss <port> <password>\n");
 	(void)sigaction(SIGPIPE, &sa, 0);
+	sa.sa_sigaction = (void *)dns_query_done;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = SA_RESTART | SA_SIGINFO;
+	sigaction(SIGUSR1, &sa, NULL);
 	port = (short)atoi(argv[PARA_LISTEN_PORT]);
 	g_pw_hash = get_key(argv[PARA_SERVER_PW], strlen(argv[PARA_SERVER_PW]), g_server_pwd);
 
@@ -248,7 +294,7 @@ int main(int argc, char *argv[])
 	if(listen(sock, 0) != 0)
 		return printf("Error %d to listen the TCP port.\n", errno);
 
-	(void)daemon(0, 0);
+	/*(void)daemon(0, 0);*/
 
 	g_epoll_fd = epoll_create1(0);
 	if (g_epoll_fd == -1) return printf("Error %d to create epoll fd.\n", errno);
