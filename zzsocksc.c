@@ -168,7 +168,7 @@ int main(int argc, char *argv[])
 	char  cwd[512] = {0,};
 
 	if(argc != PARA_MAX)
-		return printf("Userage: ./zzsocksc <http port> <sock port> <server ip> <server port> <password>\n");
+		return printf("Usage: ./zzsocksc <http port> <sock port> <server ip> <server port> <password>\n");
 	(void)getcwd(cwd, sizeof(cwd) - 1);
 	(void)sigaction(SIGPIPE, &sa, 0);
 	http_port = (short)atoi(argv[PARA_HTTP_PORT]);

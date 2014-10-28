@@ -221,7 +221,7 @@ int main(int argc, char *argv[])
 	(void)sched_setscheduler(0, SCHED_RR, &my_params);
 
 	if(argc != PARA_MAX)
-		return printf("Userage: ./zzsockss <port> <password>\n");
+		return printf("Usage: ./zzsockss <port> <password>\n");
 	(void)sigaction(SIGPIPE, &sa, 0);
 	port = (short)atoi(argv[PARA_LISTEN_PORT]);
 	g_pw_hash = get_key(argv[PARA_SERVER_PW], strlen(argv[PARA_SERVER_PW]), g_server_pwd);
