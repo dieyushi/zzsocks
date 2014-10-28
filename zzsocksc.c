@@ -20,7 +20,7 @@
 enum cmd_para{
 	PARA_HTTP_PORT = 1,
 	PARA_SOCK_PORT,
-	PARA_SERVER_IP,
+	PARA_SERVER_ADDR,
 	PARA_SERVER_PORT,
 	PARA_SERVER_PW,
 	PARA_MAX
@@ -168,12 +168,13 @@ int main(int argc, char *argv[])
 	char  cwd[512] = {0,};
 
 	if(argc != PARA_MAX)
-		return printf("Usage: ./zzsocksc <http port> <sock port> <server ip> <server port> <password>\n");
+		return printf("Usage: ./zzsocksc <http port> <sock port> <server addr> <server port> <password>\n");
 	(void)getcwd(cwd, sizeof(cwd) - 1);
 	(void)sigaction(SIGPIPE, &sa, 0);
 	http_port = (short)atoi(argv[PARA_HTTP_PORT]);
 	sock_port = (short)atoi(argv[PARA_SOCK_PORT]);
-	g_server_ip = (unsigned int)inet_network(argv[PARA_SERVER_IP]);
+	if (DNS(argv[PARA_SERVER_ADDR], &g_server_ip) != 0)
+		return printf("Error to resolve the server address.\n");
 	g_server_port = (unsigned short)atoi(argv[PARA_SERVER_PORT]);
 	g_pw_hash = get_key(argv[PARA_SERVER_PW], strlen(argv[PARA_SERVER_PW]), g_server_pwd);
 

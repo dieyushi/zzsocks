@@ -34,3 +34,23 @@ static inline void xor_crypt(char *data, int length, char *key, int num)
 		data[i] ^= key[num];
 }
 
+static int DNS(char *host, unsigned int *ip) {
+	int res = 0;
+	struct addrinfo hints = {0};
+	struct addrinfo *result = NULL, *rp = NULL;
+	struct sockaddr_in *addr = NULL;
+
+	if (!host || !ip) return -1;
+	hints.ai_family = AF_INET;
+
+	if (0 == (res = getaddrinfo(host, NULL, &hints, &result))){
+		for (rp = result; rp != NULL; rp = rp->ai_next) {
+			addr = (struct sockaddr_in*)(void*)(rp->ai_addr);
+			*ip = addr->sin_addr.s_addr;
+			break;
+		}
+		freeaddrinfo(result);
+		return 0;
+	}
+	return -1;
+}
