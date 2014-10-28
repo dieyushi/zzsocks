@@ -49,33 +49,23 @@ int set_non_blocking(int fd)
 }
 
 static int DNS(char *host, unsigned int *ip) {
-	static int errors = 0;
-	int iRes = 0;
-	struct addrinfo addrHints = {0};
-	struct addrinfo *pAddrResult = NULL, *pAddrRp = NULL;
-	struct sockaddr_in *pSrvAddr = NULL;
+	int res = 0;
+	struct addrinfo hints = {0};
+	struct addrinfo *result = NULL, *rp = NULL;
+	struct sockaddr_in *addr = NULL;
 
-	if ((NULL == host) || (NULL == ip)) {
-		return -1;
-	}
+	if (!host || !ip) return -1;
+	hints.ai_family = AF_INET;
 
-	addrHints.ai_family   = AF_INET;        /* do not support IPv6 for performance */
-	addrHints.ai_socktype = 0;
-	addrHints.ai_flags    = 0;
-	addrHints.ai_protocol = 0;
-
-	if (0 == (iRes = getaddrinfo(host, NULL, &addrHints, &pAddrResult))){
-		for (pAddrRp = pAddrResult; pAddrRp != NULL; pAddrRp = pAddrRp->ai_next) {
-			pSrvAddr = (struct sockaddr_in*)(void*)(pAddrRp->ai_addr);
-			*ip = pSrvAddr->sin_addr.s_addr;
+	if (0 == (res = getaddrinfo(host, NULL, &hints, &result))){
+		for (rp = result; rp != NULL; rp = rp->ai_next) {
+			addr = (struct sockaddr_in*)(void*)(rp->ai_addr);
+			*ip = addr->sin_addr.s_addr;
 			break;
 		}
-		freeaddrinfo(pAddrResult);
+		freeaddrinfo(result);
 		return 0;
 	}
-
-	if((++errors)%5 == 0)
-		syslog(LOG_ERR, "getaddrinfo: %s\n", gai_strerror(iRes));
 	return -1;
 }
 
